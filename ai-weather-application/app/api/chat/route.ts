@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { MessageRole } from "@prisma/client";
 import { client, MODEL } from "@/lib/mistral";
 import { Weather_API } from "@/lib/weather";
 import { SYSTEM_PROMPT } from "@/lib/systemPrompt";
@@ -42,7 +41,7 @@ export async function POST(request: Request) {
 
     // 3. Save User message to DB
     const userMessage = await prisma.message.create({
-      data: { chatId: chat.id, content, role: MessageRole.USER },
+      data: { chatId: chat.id, content, role: "USER" },
     });
 
     // 4. Build the message history for the agent loop
@@ -79,7 +78,7 @@ export async function POST(request: Request) {
       if (start === -1 || end === -1) {
         // No JSON found — treat as plain text output
         const aiMessage = await prisma.message.create({
-          data: { chatId: chat.id, content: raw, role: MessageRole.ASSISTANT },
+          data: { chatId: chat.id, content: raw, role: "ASSISTANT" },
         });
         return NextResponse.json({ success: true, userMessage, aiMessage });
       }
@@ -89,7 +88,7 @@ export async function POST(request: Request) {
         parsed = JSON.parse(raw.substring(start, end + 1));
       } catch {
         const aiMessage = await prisma.message.create({
-          data: { chatId: chat.id, content: raw, role: MessageRole.ASSISTANT },
+          data: { chatId: chat.id, content: raw, role: "ASSISTANT" },
         });
         return NextResponse.json({ success: true, userMessage, aiMessage });
       }
@@ -197,7 +196,7 @@ export async function POST(request: Request) {
             data: {
               chatId: chat.id,
               content: finalContent,
-              role: MessageRole.ASSISTANT,
+              role: "ASSISTANT",
               weatherData: weatherDataResult ? (weatherDataResult as any) : undefined,
             },
           });
@@ -223,7 +222,7 @@ export async function POST(request: Request) {
     // Safety: if loop exhausts, return last known content
     const fallbackContent = "I apologize, but I wasn't able to complete the request. Please try again.";
     const aiMessage = await prisma.message.create({
-      data: { chatId: chat.id, content: fallbackContent, role: MessageRole.ASSISTANT },
+      data: { chatId: chat.id, content: fallbackContent, role: "ASSISTANT" },
     });
     return NextResponse.json({ success: true, userMessage, aiMessage });
 
