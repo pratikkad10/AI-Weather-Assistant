@@ -1,20 +1,17 @@
-import Image from "next/image";
+import { Sidebar } from "@/components/layout/sidebar";
+import { Header } from "@/components/layout/header";
+import { BackgroundShader } from "@/components/ui/background-shader";
+import { ChatInterface } from "@/components/chat-interface";
 
-export default async function Home() {
-
-  const response = await fetch('http://localhost:3000/api/users', {
-    // Optional: forward some headers, add auth tokens, etc.
-    headers: { Authorization: `Bearer ${process.env.API_TOKEN}` },
-  });
-
-  const data = await response.json();
-
-  console.log(data);
-
+export default function Home() {
   return (
-    <div>
-      <h1>Home </h1>
-      <pre>Response: {JSON.stringify(data, null, 2)}</pre>
-    </div>
+    <>
+      <BackgroundShader />
+      <Sidebar />
+      <main className="flex-1 flex flex-col relative z-10 h-screen min-h-0 overflow-hidden w-full md:w-[calc(100%-300px)]">
+        <Header />
+        <ChatInterface />
+      </main>
+    </>
   );
 }
