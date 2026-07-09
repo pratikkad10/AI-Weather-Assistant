@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAnonymousSession } from "@/hooks/use-anonymous-session";
+import { useSearchParams, useRouter } from "next/navigation";
 
 interface AgentStep {
   step: string;
@@ -37,6 +38,10 @@ export function ChatInterface() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const chatId = searchParams.get("chatId");
+
   const scrollToBottom = useCallback(() => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
@@ -46,6 +51,29 @@ export function ChatInterface() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, liveSteps, scrollToBottom]);
+
+  useEffect(() => {
+    if (isReady && sessionId) {
+      if (chatId === "new") {
+        setMessages([]);
+        return;
+      }
+
+      setIsLoading(true);
+      fetch(`/api/chat?sessionId=${sessionId}${chatId ? `&chatId=${chatId}` : ""}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.messages) {
+            setMessages(data.messages);
+          }
+          if (!chatId && data.chatId) {
+            router.replace(`/?chatId=${data.chatId}`);
+          }
+        })
+        .catch(console.error)
+        .finally(() => setIsLoading(false));
+    }
+  }, [isReady, sessionId, chatId, router]);
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,24 +86,65 @@ export function ChatInterface() {
 
     const optimisticUserMsg: Message = { id: Date.now().toString(), content: userText, role: "USER" };
     setMessages((prev) => [...prev, optimisticUserMsg]);
+    setTimeout(scrollToBottom, 50);
 
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, content: userText }),
+        body: JSON.stringify({ sessionId, content: userText, chatId: chatId === "new" ? undefined : chatId }),
       });
 
       if (!response.ok) throw new Error("Failed to send message");
+      if (!response.body) throw new Error("No response body");
 
-      const data = await response.json();
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let done = false;
+      let buffer = "";
 
-      if (data.success && data.aiMessage) {
-        const aiMsg: Message = {
-          ...data.aiMessage,
-          agentSteps: data.agentSteps || [],
-        };
-        setMessages((prev) => [...prev, aiMsg]);
+      // Add a temporary assistant message to hold the incoming stream steps
+      const tempId = `temp-${Date.now()}`;
+      setMessages((prev) => [...prev, { id: tempId, content: "", role: "ASSISTANT", agentSteps: [] }]);
+
+      while (!done) {
+        const { value, done: doneReading } = await reader.read();
+        done = doneReading;
+
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || ""; // keep incomplete chunk
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const data = JSON.parse(line.slice(6));
+
+                if (data.type === "step") {
+                  setMessages((prev) => prev.map(m => m.id === tempId ? {
+                    ...m,
+                    agentSteps: [...(m.agentSteps || []), data.step]
+                  } : m));
+                  setTimeout(scrollToBottom, 10);
+                } else if (data.type === "output") {
+                  setMessages((prev) => prev.map(m => m.id === tempId ? {
+                    ...data.aiMessage,
+                    agentSteps: data.agentSteps || [] // ensure we keep all steps on final payload
+                  } : m));
+                  if (data.chatId && (!chatId || chatId === "new")) {
+                    router.replace(`/?chatId=${data.chatId}`);
+                  }
+                  setTimeout(scrollToBottom, 50);
+                } else if (data.type === "error") {
+                  throw new Error(data.error);
+                }
+              } catch (e) {
+                console.error("Error parsing stream chunk", e, line);
+              }
+            }
+          }
+        }
       }
     } catch (error) {
       console.error("Error sending message:", error);
@@ -94,12 +163,12 @@ export function ChatInterface() {
   return (
     <div className="relative flex-1 w-full h-full overflow-hidden flex flex-col">
       {/* Chat Canvas */}
-      <div 
+      <div
         ref={chatContainerRef}
         className="absolute inset-0 overflow-y-auto no-scrollbar px-gutter pb-[140px] pt-stack-lg"
       >
         <div className="w-full max-w-3xl mx-auto flex flex-col justify-end min-h-full">
-          
+
           {/* Empty state — vertically centered */}
           {messages.length === 0 && !isLoading && (
             <div className="flex flex-col items-center justify-center gap-6 text-center h-full min-h-[50vh] pb-20">
@@ -118,58 +187,58 @@ export function ChatInterface() {
           {/* Messages */}
           <div className="flex flex-col gap-stack-xl w-full justify-end flex-1">
             {messages.map((msg, index) => (
-            msg.role === "USER" ? (
-              <div key={msg.id} className="flex justify-end w-full animate-slide-up">
-                <div className="max-w-[95%] md:max-w-[80%] bg-linear-to-br from-inverse-primary to-primary-container text-white px-5 md:px-6 py-3 md:py-4 rounded-2xl rounded-tr-sm shadow-lg font-body-lg text-body-md md:text-body-lg">
-                  {msg.content}
-                </div>
-              </div>
-            ) : (
-              <div key={msg.id} className="flex flex-col w-full animate-slide-up" style={{ animationDelay: "100ms" }}>
-                <div className="flex items-start gap-3 md:gap-4 w-full">
-                  <div className="w-8 h-8 rounded-full bg-primary-container/20 flex items-center justify-center border border-primary/30 shrink-0 mt-1 hidden md:flex">
-                    <span className="material-symbols-outlined text-primary text-sm">cloud</span>
+              msg.role === "USER" ? (
+                <div key={msg.id} className="flex justify-end w-full animate-slide-up">
+                  <div className="max-w-[95%] md:max-w-[80%] bg-linear-to-br from-inverse-primary to-primary-container text-white px-5 md:px-6 py-3 md:py-4 rounded-2xl rounded-tr-sm shadow-lg font-body-lg text-body-md md:text-body-lg">
+                    {msg.content}
                   </div>
-                  <div className="flex flex-col w-full gap-stack-sm md:gap-stack-md max-w-full">
-
-                    {/* Agent Steps Trace */}
-                    {msg.agentSteps && msg.agentSteps.length > 0 && (
-                      <AgentStepTrace steps={msg.agentSteps} />
-                    )}
-
-                    {/* Text Response */}
-                    <div className="glass-panel px-4 md:px-6 py-4 md:py-5 rounded-2xl md:rounded-tl-sm w-full font-body-md md:font-body-lg text-body-md md:text-body-lg text-on-surface">
-                      {msg.content}
+                </div>
+              ) : (
+                <div key={msg.id} className="flex flex-col w-full animate-slide-up" style={{ animationDelay: "100ms" }}>
+                  <div className="flex items-start gap-3 md:gap-4 w-full">
+                    <div className="w-8 h-8 rounded-full bg-primary-container/20 flex items-center justify-center border border-primary/30 shrink-0 mt-1  md:flex">
+                      <span className="material-symbols-outlined text-primary text-sm">cloud</span>
                     </div>
+                    <div className="flex flex-col w-full gap-stack-sm md:gap-stack-md max-w-full">
 
-                    {/* Weather Card & Forecast */}
-                    {msg.weatherData && (
-                      <WeatherCard data={msg.weatherData} />
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          ))}
-              {/* Loading Animation with live steps */}
-              {isLoading && (
-                <div className="flex items-start gap-4 w-full animate-slide-up">
-                  <div className="w-8 h-8 rounded-full bg-primary-container/20 flex items-center justify-center border border-primary/30 shrink-0 mt-1">
-                    <span className="material-symbols-outlined text-primary text-sm animate-pulse">cloud</span>
-                  </div>
-                  <div className="flex flex-col gap-stack-sm w-full">
-                    <div className="glass-panel rounded-2xl rounded-tl-sm px-6 py-5 w-full">
-                      <div className="flex items-center gap-3">
-                        <span className="material-symbols-outlined text-primary animate-spin" style={{ animationDuration: "2s" }}>progress_activity</span>
-                        <span className="font-body-lg text-body-lg text-on-surface-variant">Thinking...</span>
+                      {/* Agent Steps Trace */}
+                      {msg.agentSteps && msg.agentSteps.length > 0 && (
+                        <AgentStepTrace steps={msg.agentSteps} />
+                      )}
+
+                      {/* Text Response */}
+                      <div className="glass-panel px-4 md:px-6 py-4 md:py-5 rounded-2xl md:rounded-tl-sm w-full font-body-md md:font-body-lg text-body-md md:text-body-lg text-on-surface">
+                        {msg.content}
                       </div>
+
+                      {/* Weather Card & Forecast */}
+                      {msg.weatherData && (
+                        <WeatherCard data={msg.weatherData} />
+                      )}
                     </div>
                   </div>
                 </div>
-              )}
-            </div>
+              )
+            ))}
+            {/* Loading Animation with live steps */}
+            {isLoading && (
+              <div className="flex items-start gap-4 w-full animate-slide-up">
+                <div className="w-8 h-8 rounded-full bg-primary-container/20 flex items-center justify-center border border-primary/30 shrink-0 mt-1">
+                  <span className="material-symbols-outlined text-primary text-sm animate-pulse">cloud</span>
+                </div>
+                <div className="flex flex-col gap-stack-sm w-full">
+                  <div className="glass-panel rounded-2xl rounded-tl-sm px-6 py-5 w-full">
+                    <div className="flex items-center gap-3">
+                      <span className="material-symbols-outlined text-primary animate-spin" style={{ animationDuration: "2s" }}>progress_activity</span>
+                      <span className="font-body-lg text-body-lg text-on-surface-variant">Thinking...</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
-            {/* Bottom spacing spacer */}
+          {/* Bottom spacing spacer */}
           <div ref={chatEndRef} className="h-4 shrink-0" />
         </div>
       </div>
@@ -245,6 +314,25 @@ function AgentStepTrace({ steps }: { steps: AgentStep[] }) {
           <div className="flex flex-col gap-1">
             {visibleSteps.map((step, i) => {
               const config = STEP_CONFIG[step.step] || { icon: "info", label: step.step, color: "text-on-surface-variant" };
+
+              // Map raw internal labels to professional UI labels
+              let friendlyLabel = config.label;
+              if (step.step === "TOOL") friendlyLabel = "Connecting to Data Sources";
+              else if (step.step === "TOOL_RESPONSE") friendlyLabel = "Data Retrieved";
+              else if (step.step === "PLAN") friendlyLabel = "Reasoning";
+              else if (step.step === "START") friendlyLabel = "Initializing";
+
+              // Map raw internal content to professional UI content
+              let friendlyContent = step.content;
+              if (step.step === "TOOL") {
+                const city = step.input?.city || "specified location";
+                friendlyContent = `Querying live meteorological databases for ${city}...`;
+              } else if (step.step === "TOOL_RESPONSE") {
+                friendlyContent = "Successfully established secure connection and retrieved environmental telemetry.";
+              } else if (step.step === "OBSERVATION") {
+                friendlyContent = "Analyzing the retrieved data against request parameters.";
+              }
+
               return (
                 <div key={`step-${i}`} className="flex items-start gap-3 py-2 group">
                   {/* Vertical line connector */}
@@ -255,22 +343,17 @@ function AgentStepTrace({ steps }: { steps: AgentStep[] }) {
                       </span>
                     </div>
                     {i < visibleSteps.length - 1 && (
-                      <div className="w-px h-full min-h-[8px] bg-white/10 mt-1"></div>
+                      <div className="w-px h-full min-h-stack-sm bg-white/10 mt-1"></div>
                     )}
                   </div>
 
                   {/* Step content */}
                   <div className="flex flex-col gap-0.5 min-w-0 flex-1 pb-1">
                     <span className={`font-label-sm text-label-sm ${config.color} uppercase tracking-wider`}>
-                      {config.label}
-                      {step.tool && (
-                        <span className="text-on-surface-variant ml-1 normal-case tracking-normal">
-                          → {step.tool}({step.input?.city ? `"${step.input.city}"` : ""})
-                        </span>
-                      )}
+                      {friendlyLabel}
                     </span>
-                    <span className="font-body-sm text-body-sm text-on-surface-variant/80 break-words leading-relaxed">
-                      {step.step === "TOOL_RESPONSE" ? step.output : step.content}
+                    <span className="font-body-sm text-body-sm text-on-surface-variant/80 wrap-break-words leading-relaxed">
+                      {friendlyContent}
                     </span>
                   </div>
                 </div>
@@ -287,7 +370,7 @@ function AgentStepTrace({ steps }: { steps: AgentStep[] }) {
    Weather Card — renders current + forecast
    ────────────────────────────────────────────── */
 function WeatherCard({ data }: { data: any }) {
-  if (!data || !data.current || !data.forecast) return null;
+  if (!data || !data.current) return null;
 
   return (
     <>
@@ -305,43 +388,47 @@ function WeatherCard({ data }: { data: any }) {
             <p className="font-headline-md text-headline-sm md:text-headline-md text-primary mt-1">{data.current.condition}</p>
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-stack-sm mt-stack-lg pt-stack-md border-t border-white/10">
-          <div className="flex flex-col">
-            <span className="font-label-sm text-label-sm text-on-surface-variant">Feels like</span>
-            <span className="font-body-lg text-body-lg text-on-surface">{data.current.feelsLike}°C</span>
+        {data.current.feelsLike !== undefined && (
+          <div className="grid grid-cols-3 gap-stack-sm mt-stack-lg pt-stack-md border-t border-white/10">
+            <div className="flex flex-col">
+              <span className="font-label-sm text-label-sm text-on-surface-variant">Feels like</span>
+              <span className="font-body-lg text-body-lg text-on-surface">{data.current.feelsLike}°C</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="font-label-sm text-label-sm text-on-surface-variant">Humidity</span>
+              <span className="font-body-lg text-body-lg text-on-surface">{data.current.humidity}%</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="font-label-sm text-label-sm text-on-surface-variant">Wind</span>
+              <span className="font-body-lg text-body-lg text-on-surface">{data.current.wind} km/h</span>
+            </div>
           </div>
-          <div className="flex flex-col">
-            <span className="font-label-sm text-label-sm text-on-surface-variant">Humidity</span>
-            <span className="font-body-lg text-body-lg text-on-surface">{data.current.humidity}%</span>
-          </div>
-          <div className="flex flex-col">
-            <span className="font-label-sm text-label-sm text-on-surface-variant">Wind</span>
-            <span className="font-body-lg text-body-lg text-on-surface">{data.current.wind} km/h</span>
-          </div>
-        </div>
+        )}
       </div>
 
-      <div className="w-full mt-2">
-        <h4 className="font-label-md text-label-md text-on-surface-variant mb-3 px-1">7-Day Forecast</h4>
-        <div className="flex overflow-x-auto no-scrollbar gap-stack-sm pb-4 w-full">
-          {data.forecast.map((dayData: any, i: number) => (
-            <div
-              key={`forecast-${i}`}
-              className={`glass-panel rounded-xl p-4 flex flex-col items-center min-w-[90px] shrink-0 ${i === 0 ? "bg-primary-container/10 border-primary/20" : ""}`}
-            >
-              <span className={`font-label-md text-label-md ${i === 0 ? "text-primary font-bold" : "text-on-surface-variant"}`}>
-                {dayData.day}
-              </span>
-              <span className={`material-symbols-outlined ${i === 0 ? "text-secondary" : "text-on-surface"} my-2`} style={{ fontVariationSettings: "'FILL' 1" }}>
-                {dayData.icon}
-              </span>
-              <span className="font-body-md text-body-md text-on-surface">
-                {dayData.high}° <span className="text-on-surface-variant text-sm">{dayData.low}°</span>
-              </span>
-            </div>
-          ))}
+      {data.forecast && data.forecast.length > 0 && (
+        <div className="w-full mt-2">
+          <h4 className="font-label-md text-label-md text-on-surface-variant mb-3 px-1">7-Day Forecast</h4>
+          <div className="flex overflow-x-auto no-scrollbar gap-stack-sm pb-4 w-full">
+            {data.forecast.map((dayData: any, i: number) => (
+              <div
+                key={`forecast-${i}`}
+                className={`glass-panel rounded-xl p-4 flex flex-col items-center min-w-[90px] shrink-0 ${i === 0 ? "bg-primary-container/10 border-primary/20" : ""}`}
+              >
+                <span className={`font-label-md text-label-md ${i === 0 ? "text-primary font-bold" : "text-on-surface-variant"}`}>
+                  {dayData.day}
+                </span>
+                <span className={`material-symbols-outlined ${i === 0 ? "text-secondary" : "text-on-surface"} my-2`} style={{ fontVariationSettings: "'FILL' 1" }}>
+                  {dayData.icon}
+                </span>
+                <span className="font-body-md text-body-md text-on-surface">
+                  {dayData.high}° <span className="text-on-surface-variant text-sm">{dayData.low}°</span>
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

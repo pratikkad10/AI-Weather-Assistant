@@ -4,6 +4,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Aether Weather AI",
   description: "Your intelligent weather assistant",
+  icons: {
+    icon: "/screen.png",
+  },
 };
 
 export default function RootLayout({
