@@ -53,7 +53,7 @@ Built on top of the **Next.js App Router**, this application prioritizes edge-pe
 | **Language** | [TypeScript](https://www.typescriptlang.org/) | Strictly typed JavaScript |
 | **Styling** | [Tailwind CSS](https://tailwindcss.com/) | Utility-first CSS framework |
 | **Components** | [Radix UI](https://www.radix-ui.com/) / Shadcn | Accessible UI primitives |
-| **AI Engine**| OpenAI / Gemini API | Natural language processing |
+| **AI Engine**| Mistral AI | Natural language processing |
 | **Weather Data** | OpenWeatherMap | High-fidelity meteorological data source |
 | **Deployment** | [Vercel](https://vercel.com/) | Global edge network deployment |
 
