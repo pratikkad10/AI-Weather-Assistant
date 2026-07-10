@@ -55,7 +55,7 @@ Built on top of the **Next.js App Router**, this application prioritizes edge-pe
 | **Components** | [Radix UI](https://www.radix-ui.com/) / Shadcn | Accessible UI primitives |
 | **AI Engine**| Mistral AI | Natural language processing |
 | **Weather Data** | OpenWeatherMap | High-fidelity meteorological data source |
-| **Deployment** | [Vercel](https://vercel.com/) | Global edge network deployment |
+| **Deployment** | [Vercel Live App](https://ai-weather-assistant-two.vercel.app) | Deployed on Vercel Edge Network |
 
 ## 🏗️ Architecture Flow
 
