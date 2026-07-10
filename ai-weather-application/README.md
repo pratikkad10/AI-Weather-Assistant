@@ -7,6 +7,8 @@
     <strong>A next-generation, AI-powered intelligent weather forecasting application.</strong>
     <br />
     <br />
+    <a href="https://ai-weather-assistant-two.vercel.app"><strong>View Live Demo</strong></a>
+    ·
     <a href="https://github.com/pratikkad10/AI-Weather-Assistant">Explore the Docs</a>
     ·
     <a href="https://github.com/pratikkad10/AI-Weather-Assistant/issues">Report Bug</a>
